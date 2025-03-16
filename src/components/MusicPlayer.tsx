@@ -4,85 +4,196 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-
 import { cn } from '@/lib/utils';
 import { usePlayerContext } from '@/context/PlayerContext';
 import { motion, AnimatePresence } from 'framer-motion';
-
-declare global {
-  interface Window {
-    YT: any;
-    onYouTubeIframeAPIReady: () => void;
-  }
-}
+import { YouTubePlayer } from '@/types/youtube';
 
 const MusicPlayer = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.7);
   const [isMuted, setIsMuted] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
   
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<HTMLIFrameElement>(null);
-  const ytPlayerRef = useRef<any>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const playerInstanceRef = useRef<YouTubePlayer | null>(null);
   
   const { 
     currentSongId, 
     currentSongTitle, 
     currentSongArtist, 
     currentSongThumbnail,
-    audioUrl,
     isPlaying,
     setIsPlaying,
     stopPlayback
   } = usePlayerContext();
 
+  // Load YouTube API
   useEffect(() => {
-    // Only load YouTube API if we have a song
     if (!currentSongId) return;
-
-    // Create YouTube player when audioUrl changes
-    if (playerRef.current && audioUrl) {
-      playerRef.current.src = audioUrl;
+    
+    // Load YouTube API if not already loaded
+    if (!window.YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+      
+      window.onYouTubeIframeAPIReady = initializePlayer;
+    } else {
+      initializePlayer();
     }
-  }, [audioUrl, currentSongId]);
+    
+    return () => {
+      if (playerInstanceRef.current) {
+        try {
+          playerInstanceRef.current.destroy();
+        } catch (error) {
+          console.error('Error destroying YouTube player:', error);
+        }
+      }
+    };
+  }, [currentSongId]);
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  const initializePlayer = () => {
+    if (!currentSongId || !window.YT || !window.YT.Player) return;
+    
+    try {
+      // Create a container for the player if it doesn't exist
+      let playerContainer = document.getElementById('youtube-player-container');
+      if (!playerContainer) {
+        playerContainer = document.createElement('div');
+        playerContainer.id = 'youtube-player-container';
+        playerContainer.style.position = 'absolute';
+        playerContainer.style.left = '-9999px';
+        playerContainer.style.top = '-9999px';
+        document.body.appendChild(playerContainer);
+      }
+      
+      // Create new player instance
+      playerInstanceRef.current = new window.YT.Player(playerContainer, {
+        height: '0',
+        width: '0',
+        videoId: currentSongId,
+        playerVars: {
+          autoplay: 1,
+          controls: 0,
+          disablekb: 1,
+          enablejsapi: 1,
+          iv_load_policy: 3,
+          modestbranding: 1,
+          showinfo: 0,
+          rel: 0
+        },
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange,
+          onError: onPlayerError
+        }
+      });
+    } catch (error) {
+      console.error('Error initializing YouTube player:', error);
+    }
   };
+
+  const onPlayerReady = (event: any) => {
+    setPlayerReady(true);
+    
+    // Set initial volume
+    event.target.setVolume(volume * 100);
+    
+    // Get duration
+    const videoDuration = event.target.getDuration();
+    setDuration(videoDuration);
+    
+    // Start playing
+    if (isPlaying) {
+      event.target.playVideo();
+    }
+    
+    // Start progress tracking
+    startProgressTracking();
+  };
+
+  const onPlayerStateChange = (event: any) => {
+    // YT.PlayerState.PLAYING = 1
+    if (event.data === 1 && !isPlaying) {
+      setIsPlaying(true);
+    }
+    
+    // YT.PlayerState.PAUSED = 2
+    if (event.data === 2 && isPlaying) {
+      setIsPlaying(false);
+    }
+    
+    // YT.PlayerState.ENDED = 0
+    if (event.data === 0) {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  };
+
+  const onPlayerError = (event: any) => {
+    console.error('YouTube player error:', event);
+    stopPlayback();
+  };
+
+  const startProgressTracking = () => {
+    const interval = setInterval(() => {
+      if (playerInstanceRef.current && playerReady) {
+        try {
+          const currentTimeValue = playerInstanceRef.current.getCurrentTime();
+          setCurrentTime(currentTimeValue);
+        } catch (error) {
+          console.error('Error getting current time:', error);
+        }
+      }
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  };
+
+  useEffect(() => {
+    const interval = startProgressTracking();
+    return () => clearInterval(interval);
+  }, [playerReady]);
+
+  // Handle play/pause
+  useEffect(() => {
+    if (!playerInstanceRef.current || !playerReady) return;
+    
+    try {
+      if (isPlaying) {
+        playerInstanceRef.current.playVideo();
+      } else {
+        playerInstanceRef.current.pauseVideo();
+      }
+    } catch (error) {
+      console.error('Error controlling playback:', error);
+    }
+  }, [isPlaying, playerReady]);
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      const command = isPlaying ? 'pauseVideo' : 'playVideo';
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: command
-      }), '*');
-    }
   };
 
   const handleProgressClick = (e: React.MouseEvent) => {
-    if (!progressRef.current || !duration) return;
+    if (!progressRef.current || !duration || !playerInstanceRef.current || !playerReady) return;
     
     const rect = progressRef.current.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
     const newTime = percent * duration;
     
-    setCurrentTime(newTime);
-    
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: 'seekTo',
-        args: [newTime, true]
-      }), '*');
+    try {
+      playerInstanceRef.current.seekTo(newTime, true);
+      setCurrentTime(newTime);
+    } catch (error) {
+      console.error('Error seeking to time:', error);
     }
   };
 
   const handleVolumeClick = (e: React.MouseEvent) => {
-    if (!volumeRef.current) return;
+    if (!volumeRef.current || !playerInstanceRef.current || !playerReady) return;
     
     const rect = volumeRef.current.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
@@ -91,42 +202,41 @@ const MusicPlayer = () => {
     setVolume(newVolume);
     setIsMuted(newVolume === 0);
     
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: 'setVolume',
-        args: [newVolume * 100]
-      }), '*');
+    try {
+      playerInstanceRef.current.setVolume(newVolume * 100);
+      if (newVolume === 0) {
+        playerInstanceRef.current.mute();
+      } else {
+        playerInstanceRef.current.unMute();
+      }
+    } catch (error) {
+      console.error('Error setting volume:', error);
     }
   };
 
   const toggleMute = () => {
+    if (!playerInstanceRef.current || !playerReady) return;
+    
     const newMuteState = !isMuted;
     setIsMuted(newMuteState);
     
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: newMuteState ? 'mute' : 'unMute'
-      }), '*');
+    try {
+      if (newMuteState) {
+        playerInstanceRef.current.mute();
+      } else {
+        playerInstanceRef.current.unMute();
+        playerInstanceRef.current.setVolume(volume * 100);
+      }
+    } catch (error) {
+      console.error('Error toggling mute:', error);
     }
   };
 
-  // Update progress bar and time display
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (isPlaying && duration > 0) {
-        setCurrentTime((prev) => {
-          const newTime = prev + 0.5;
-          return newTime > duration ? 0 : newTime;
-        });
-      }
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [isPlaying, duration]);
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   if (!currentSongId) return null;
 
@@ -188,7 +298,10 @@ const MusicPlayer = () => {
           
           {/* Volume control */}
           <div className="hidden sm:flex items-center space-x-3">
-            <button onClick={toggleMute} className="text-muted-foreground hover:text-white transition-colors">
+            <button 
+              onClick={toggleMute} 
+              className="text-muted-foreground hover:text-white transition-colors"
+            >
               {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
             </button>
             <div 
@@ -201,20 +314,14 @@ const MusicPlayer = () => {
                 style={{ width: `${volume * 100}%` }}
               />
             </div>
-            <button onClick={stopPlayback} className="text-muted-foreground hover:text-white ml-2">
+            <button 
+              onClick={stopPlayback} 
+              className="text-muted-foreground hover:text-white ml-2"
+            >
               <X size={20} />
             </button>
           </div>
         </div>
-        
-        {/* YouTube iframe (hidden) */}
-        <iframe
-          ref={playerRef}
-          src={audioUrl}
-          className="absolute left-0 top-0 w-0 h-0 opacity-0 invisible"
-          allow="autoplay; encrypted-media"
-          title="YouTube video player"
-        />
       </motion.div>
     </AnimatePresence>
   );
