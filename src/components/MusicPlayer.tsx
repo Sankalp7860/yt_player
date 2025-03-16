@@ -1,48 +1,50 @@
 
 import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { usePlayerContext } from '@/context/PlayerContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
-declare global {
-  interface Window {
-    YT: any;
-    onYouTubeIframeAPIReady: () => void;
-  }
-}
-
 const MusicPlayer = () => {
+  const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.7);
   const [isMuted, setIsMuted] = useState(false);
   
+  const audioRef = useRef<HTMLAudioElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const volumeRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<HTMLIFrameElement>(null);
-  const ytPlayerRef = useRef<any>(null);
   
   const { 
     currentSongId, 
     currentSongTitle, 
     currentSongArtist, 
     currentSongThumbnail,
-    audioUrl,
-    isPlaying,
-    setIsPlaying,
-    stopPlayback
+    audioUrl
   } = usePlayerContext();
 
   useEffect(() => {
-    // Only load YouTube API if we have a song
-    if (!currentSongId) return;
-
-    // Create YouTube player when audioUrl changes
-    if (playerRef.current && audioUrl) {
-      playerRef.current.src = audioUrl;
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.play().catch(() => setIsPlaying(false));
+      } else {
+        audioRef.current.pause();
+      }
     }
-  }, [audioUrl, currentSongId]);
+  }, [isPlaying, audioUrl]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = isMuted ? 0 : volume;
+    }
+  }, [volume, isMuted]);
+
+  useEffect(() => {
+    if (audioUrl && audioRef.current) {
+      setIsPlaying(true);
+    }
+  }, [audioUrl]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -52,81 +54,34 @@ const MusicPlayer = () => {
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      const command = isPlaying ? 'pauseVideo' : 'playVideo';
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: command
-      }), '*');
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+      setDuration(audioRef.current.duration);
     }
   };
 
   const handleProgressClick = (e: React.MouseEvent) => {
-    if (!progressRef.current || !duration) return;
-    
-    const rect = progressRef.current.getBoundingClientRect();
-    const percent = (e.clientX - rect.left) / rect.width;
-    const newTime = percent * duration;
-    
-    setCurrentTime(newTime);
-    
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: 'seekTo',
-        args: [newTime, true]
-      }), '*');
+    if (progressRef.current && audioRef.current) {
+      const rect = progressRef.current.getBoundingClientRect();
+      const percent = (e.clientX - rect.left) / rect.width;
+      audioRef.current.currentTime = percent * audioRef.current.duration;
     }
   };
 
   const handleVolumeClick = (e: React.MouseEvent) => {
-    if (!volumeRef.current) return;
-    
-    const rect = volumeRef.current.getBoundingClientRect();
-    const percent = (e.clientX - rect.left) / rect.width;
-    const newVolume = Math.max(0, Math.min(1, percent));
-    
-    setVolume(newVolume);
-    setIsMuted(newVolume === 0);
-    
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: 'setVolume',
-        args: [newVolume * 100]
-      }), '*');
+    if (volumeRef.current) {
+      const rect = volumeRef.current.getBoundingClientRect();
+      const percent = (e.clientX - rect.left) / rect.width;
+      setVolume(Math.max(0, Math.min(1, percent)));
     }
   };
 
   const toggleMute = () => {
-    const newMuteState = !isMuted;
-    setIsMuted(newMuteState);
-    
-    if (playerRef.current) {
-      const iframe = playerRef.current;
-      iframe.contentWindow?.postMessage(JSON.stringify({
-        event: 'command',
-        func: newMuteState ? 'mute' : 'unMute'
-      }), '*');
-    }
+    setIsMuted(!isMuted);
   };
-
-  // Update progress bar and time display
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (isPlaying && duration > 0) {
-        setCurrentTime((prev) => {
-          const newTime = prev + 0.5;
-          return newTime > duration ? 0 : newTime;
-        });
-      }
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [isPlaying, duration]);
 
   if (!currentSongId) return null;
 
@@ -201,19 +156,15 @@ const MusicPlayer = () => {
                 style={{ width: `${volume * 100}%` }}
               />
             </div>
-            <button onClick={stopPlayback} className="text-muted-foreground hover:text-white ml-2">
-              <X size={20} />
-            </button>
           </div>
         </div>
         
-        {/* YouTube iframe (hidden) */}
-        <iframe
-          ref={playerRef}
+        <audio
+          ref={audioRef}
           src={audioUrl}
-          className="absolute left-0 top-0 w-0 h-0 opacity-0 invisible"
-          allow="autoplay; encrypted-media"
-          title="YouTube video player"
+          onTimeUpdate={handleTimeUpdate}
+          onEnded={() => setIsPlaying(false)}
+          onLoadedMetadata={handleTimeUpdate}
         />
       </motion.div>
     </AnimatePresence>
