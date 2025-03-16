@@ -115,6 +115,12 @@ export const searchSongs = async (query: string): Promise<Song[]> => {
   }
 };
 
+// Get audio URL for a song (using YouTube embed)
+export const getAudioUrl = (videoId: string): string => {
+  // For direct embedding - we'll use this to create iframe source
+  return `https://www.youtube.com/embed/${videoId}?autoplay=1&enablejsapi=1`;
+};
+
 // Helper function to get song details by ID
 export const getSongById = async (videoId: string): Promise<Song | null> => {
   try {

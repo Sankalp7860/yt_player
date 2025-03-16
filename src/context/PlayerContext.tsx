@@ -1,5 +1,6 @@
 
 import { createContext, useContext, useState } from 'react';
+import { getAudioUrl } from '@/utils/youtubeApi';
 import { toast } from 'sonner';
 
 interface PlayerContextType {
@@ -7,6 +8,7 @@ interface PlayerContextType {
   currentSongTitle: string;
   currentSongArtist: string;
   currentSongThumbnail: string;
+  audioUrl: string;
   isPlaying: boolean;
   playSong: (id: string, title: string, artist: string, thumbnail: string) => void;
   stopPlayback: () => void;
@@ -20,6 +22,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentSongTitle, setCurrentSongTitle] = useState('');
   const [currentSongArtist, setCurrentSongArtist] = useState('');
   const [currentSongThumbnail, setCurrentSongThumbnail] = useState('');
+  const [audioUrl, setAudioUrl] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
 
   const playSong = (id: string, title: string, artist: string, thumbnail: string) => {
@@ -28,6 +31,9 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     setCurrentSongArtist(artist);
     setCurrentSongThumbnail(thumbnail);
     setIsPlaying(true);
+    
+    // Get YouTube embed URL
+    setAudioUrl(getAudioUrl(id));
     
     toast.success(`Now playing: ${title}`, {
       description: artist,
@@ -41,6 +47,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
     setCurrentSongTitle('');
     setCurrentSongArtist('');
     setCurrentSongThumbnail('');
+    setAudioUrl('');
   };
 
   return (
@@ -50,6 +57,7 @@ export const PlayerProvider = ({ children }: { children: React.ReactNode }) => {
         currentSongTitle,
         currentSongArtist,
         currentSongThumbnail,
+        audioUrl,
         isPlaying,
         playSong,
         stopPlayback,
