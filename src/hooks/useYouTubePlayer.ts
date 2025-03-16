@@ -34,6 +34,7 @@ export const useYouTubePlayer = ({
   const [isMuted, setIsMuted] = useState(false);
   
   const playerInstanceRef = useRef<YouTubePlayer | null>(null);
+  const progressIntervalRef = useRef<number | null>(null);
   
   // Load YouTube API
   useEffect(() => {
@@ -155,8 +156,20 @@ export const useYouTubePlayer = ({
       }
     };
     
-    const interval = setInterval(trackProgress, 1000);
-    return () => clearInterval(interval);
+    // Clear existing interval if it exists
+    if (progressIntervalRef.current) {
+      window.clearInterval(progressIntervalRef.current);
+    }
+    
+    // Set new interval
+    progressIntervalRef.current = window.setInterval(trackProgress, 1000);
+    
+    // Cleanup on unmount
+    return () => {
+      if (progressIntervalRef.current) {
+        window.clearInterval(progressIntervalRef.current);
+      }
+    };
   }, [playerReady]);
 
   // Handle play/pause
